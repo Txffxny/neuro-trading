@@ -42,3 +42,18 @@ same model reading raw returns, the biology isn't adding anything yet.
 ## Sanity check
 On `data/synthetic.csv` the No neurons model should beat nearly all random
 traders (the trends are real). On the simulator, Neurons should look random.
+
+## Live trading terminal (for the demo)
+    python serve_trading.py
+Opens http://127.0.0.1:8770. Choose the data, condition, number of days and
+pace, then press Start. You'll see the price chart with buys and exits, the
+electrode array firing, the buy-versus-wait signal, a trade blotter, and P&L
+against buy-and-hold. At the end it reports how the neurons did against 1,000
+random traders. Each session is saved to results_trading/live_*.json.
+Normal pace runs about 250 days in 3-4 minutes; Fast is quicker.
+
+## Limitations to mention
+- No trading costs or slippage: every trade is assumed free and filled at the close.
+- One instrument (SPY by default) and a short test window, so few trades.
+- Long only: the strategy never bets on prices falling.
+- The electrode grid on screen is in channel-number order, not physical position.

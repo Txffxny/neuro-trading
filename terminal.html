@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neuro Desk: living neurons trading live</title>
+<style>
+  :root {
+    --bg: #000000; --panel: #0A0D12; --rule: #1D2430; --text: #E6E9EE; --muted: #7D8796;
+    --amber: #FFA31A; --up: #26C281; --down: #F2453D; --input: #3FB8FF;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); height: 100%; }
+  body {
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", ui-monospace, monospace;
+    font-size: 14px; line-height: 1.4; font-variant-numeric: tabular-nums;
+  }
+  .up { color: var(--up); } .down { color: var(--down); } .muted { color: var(--muted); } .amber { color: var(--amber); }
+
+  /* Ticker bar */
+  .bar {
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--rule); background: var(--panel);
+  }
+  .brand { color: var(--amber); font-weight: 700; font-size: 16px; letter-spacing: .04em; }
+  .tick { display: flex; align-items: baseline; gap: 10px; }
+  .tick .sym { font-weight: 700; font-size: 18px; }
+  .tick .px { font-size: 22px; font-weight: 700; }
+  .tag { border: 1px solid var(--rule); padding: 1px 8px; color: var(--muted); font-size: 12px; }
+  .tag.live { color: var(--up); border-color: var(--up); }
+  .controls { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button {
+    font: inherit; font-size: 13px; color: var(--text); background: #000;
+    border: 1px solid var(--rule); padding: 5px 8px;
+  }
+  button { cursor: pointer; padding: 5px 14px; font-weight: 700; }
+  button.go { background: var(--amber); color: #000; border-color: var(--amber); }
+  button.halt { border-color: var(--down); color: var(--down); }
+  button[disabled] { opacity: .4; cursor: default; }
+  select:focus-visible, button:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+
+  /* Layout */
+  .grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 1px; background: var(--rule);
+    min-height: calc(100vh - 54px);
+  }
+  @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+  .col { display: grid; align-content: start; background: var(--bg); }
+  .panel { background: var(--bg); padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  .panel h2 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--amber); display: flex; justify-content: space-between; }
+  .panel h2 span { color: var(--muted); font-weight: 400; }
+  svg { display: block; width: 100%; }
+  svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+
+  /* Electrode array */
+  .array { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+  .el {
+    aspect-ratio: 1; border: 1px solid #141a22; background: #06080B;
+    display: grid; place-items: center; font-size: 10px; color: transparent; position: relative;
+  }
+  .el.r-buy { border-color: var(--up); } .el.r-wait { border-color: var(--down); }
+  .el.r-up, .el.r-down { border-color: var(--input); border-style: dashed; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border: 1px solid; margin-right: 5px; vertical-align: -1px; }
+
+  /* Signal */
+  .signal { display: grid; grid-template-columns: 46px 1fr 40px; gap: 6px 10px; align-items: center; }
+  .meter { height: 12px; background: #06080B; border: 1px solid var(--rule); }
+  .meter i { display: block; height: 100%; width: 0; transition: width .25s; }
+  .decision { margin-top: 12px; font-size: 30px; font-weight: 800; letter-spacing: .04em; }
+  .reason { color: var(--muted); font-size: 12px; min-height: 1.4em; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .stats div span { display: block; color: var(--muted); font-size: 11px; }
+  .stats div b { font-size: 18px; }
+
+  /* Blotter */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 400; border-bottom: 1px solid var(--rule); padding: 3px 4px; }
+  td { padding: 3px 4px; border-bottom: 1px solid #0F141B; }
+  td.r, th.r { text-align: right; }
+  .blotter { max-height: 230px; overflow-y: auto; }
+  .flash { animation: flash .9s ease-out; }
+  @keyframes flash { from { background: rgba(255,163,26,.25); } to { background: transparent; } }
+
+  /* Summary */
+  #summary { display: none; border-top: 1px solid var(--amber); }
+  #summary.show { display: block; }
+  #summary .big { font-size: 24px; font-weight: 800; margin: 2px 0 6px; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } .meter i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="brand">NEURO/DESK</div>
+  <div class="tick">
+    <span class="sym" id="sym">—</span>
+    <span class="px" id="px">—</span>
+    <span id="chg" class="muted"></span>
+  </div>
+  <span class="muted" id="date"></span>
+  <span class="tag" id="cond">idle</span>
+  <span class="tag" id="sim" hidden>simulator</span>
+  <div class="controls">
+    <select id="data" aria-label="Price data"></select>
+    <select id="condition" aria-label="Condition">
+      <option value="feedback">Feedback</option>
+      <option value="random_feedback">Random feedback</option>
+      <option value="none">No feedback</option>
+    </select>
+    <select id="days" aria-label="Trading days">
+      <option value="60">60 days</option>
+      <option value="120">120 days</option>
+      <option value="250" selected>250 days</option>
+      <option value="500">500 days</option>
+    </select>
+    <select id="pace" aria-label="Pace">
+      <option value="fast">Fast</option>
+      <option value="normal" selected>Normal</option>
+      <option value="slow">Slow</option>
+    </select>
+    <button class="go" id="start" type="button">Start</button>
+    <button class="halt" id="stop" type="button" disabled>Stop</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="col">
+    <section class="panel">
+      <h2>Price <span id="priceNote">buys ▲, exits ▼, shaded while holding</span></h2>
+      <svg id="price" viewBox="0 0 900 340" preserveAspectRatio="none" role="img" aria-label="Price chart with trades"></svg>
+    </section>
+    <section class="panel">
+      <h2>Profit and loss <span><b class="amber">━</b> neurons &nbsp; <b class="muted">┅</b> buy and hold</span></h2>
+      <svg id="pnl" viewBox="0 0 900 180" preserveAspectRatio="none" role="img" aria-label="Profit and loss"></svg>
+    </section>
+    <section class="panel" id="summary">
+      <h2>Session result</h2>
+      <div class="big" id="sumBig"></div>
+      <div id="sumText" class="muted"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <h2>Electrode array <span id="spikeTotal"></span></h2>
+      <div class="array" id="array"></div>
+      <div class="legend">
+        <span><i style="border-color: var(--input); border-style: dashed"></i>price input</span>
+        <span><i style="border-color: var(--up)"></i>buy group</span>
+        <span><i style="border-color: var(--down)"></i>wait group</span>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Signal</h2>
+      <div class="signal">
+        <span class="up">BUY</span><div class="meter"><i id="mBuy" style="background: var(--up)"></i></div><span id="nBuy" class="r">0</span>
+        <span class="down">WAIT</span><div class="meter"><i id="mWait" style="background: var(--down)"></i></div><span id="nWait">0</span>
+      </div>
+      <div class="decision muted" id="decision">—</div>
+      <div class="reason" id="reason">Press Start to begin a session.</div>
+    </section>
+    <section class="panel">
+      <h2>Account</h2>
+      <div class="stats">
+        <div><span>Neurons P&amp;L</span><b id="sPnl">0.0%</b></div>
+        <div><span>Buy and hold</span><b id="sBh">0.0%</b></div>
+        <div><span>Trades</span><b id="sTrades">0</b></div>
+        <div><span>Win rate</span><b id="sWin">—</b></div>
+        <div><span>Position</span><b id="sPos">Flat</b></div>
+        <div><span>Day</span><b id="sDay">0 / 0</b></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Blotter</h2>
+      <div class="blotter">
+        <table>
+          <thead><tr><th>Entry</th><th>Exit</th><th class="r">Buy</th><th class="r">Sell</th><th class="r">Return</th></tr></thead>
+          <tbody id="blotter"><tr><td colspan="5" class="muted">No trades yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+let since = 0, runId = null, S = null;
+
+const pct = (x, d = 1) => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(d) + "%";
+const cls = x => x > 0 ? "up" : x < 0 ? "down" : "muted";
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; }
+
+// Electrode grid (cells in channel-number order; physical layout may differ)
+for (let c = 0; c < 64; c++) { const d = document.createElement("div"); d.className = "el"; d.title = `Channel ${c}`; $("array").appendChild(d); }
+
+function reset(start) {
+  S = { start, history: start.history.map(h => h.close), days: [], trades: [], holding: [], buys: [], exits: [], total: start.days };
+  $("sym").textContent = start.symbol;
+  $("cond").textContent = { feedback: "feedback", random_feedback: "random feedback", none: "no feedback" }[start.condition];
+  $("cond").className = "tag live";
+  $("sim").hidden = !start.simulator;
+  $("summary").classList.remove("show");
+  $("blotter").innerHTML = `<tr><td colspan="5" class="muted">No trades yet.</td></tr>`;
+  [...$("array").children].forEach((d, c) => { d.className = "el" + (start.roles[c] ? " r-" + start.roles[c] : ""); d.style.background = ""; });
+  ["sPnl", "sBh"].forEach(k => { $(k).textContent = "0.0%"; $(k).className = ""; });
+  $("sTrades").textContent = "0"; $("sWin").textContent = "—"; $("sPos").textContent = "Flat";
+}
+
+function onDay(e) {
+  const idx = S.days.length;
+  S.days.push(e);
+  if (e.decision === "buy") S.buys.push(idx);
+  if (e.closed) { S.trades.push(e.closed); S.exits.push({ idx, ret: e.closed.ret }); addBlotter(e.closed); }
+  S.holding.push(!!e.position);
+
+  // ticker
+  $("px").textContent = e.close.toFixed(2);
+  $("chg").textContent = pct(e.ret, 2); $("chg").className = cls(e.ret);
+  $("date").textContent = e.date;
+
+  // electrodes
+  const max = Math.max(4, ...e.counts);
+  [...$("array").children].forEach((d, c) => {
+    const v = e.counts[c] / max;
+    d.style.background = v ? `rgba(255, 163, 26, ${0.12 + 0.88 * v})` : "";
+  });
+  $("spikeTotal").textContent = e.counts.reduce((a, b) => a + b, 0) + " spikes";
+
+  // signal
+  const m = Math.max(1, e.buy, e.wait);
+  $("mBuy").style.width = (e.buy / m * 100) + "%"; $("mWait").style.width = (e.wait / m * 100) + "%";
+  $("nBuy").textContent = e.buy; $("nWait").textContent = e.wait;
+  const dec = $("decision"), why = $("reason");
+  if (e.decision === "buy") { dec.textContent = "BUY"; dec.className = "decision up"; why.textContent = `Buy electrodes fired more (${e.buy} vs ${e.wait}). Bought at ${e.close.toFixed(2)}.`; }
+  else if (e.decision === "wait") { dec.textContent = "WAIT"; dec.className = "decision muted"; why.textContent = `Wait electrodes fired as much or more (${e.wait} vs ${e.buy}).`; }
+  else if (e.decision === "holding") { dec.textContent = "HOLDING"; dec.className = "decision amber"; why.textContent = `In a position since ${e.position.entry_date}. Exit rules decide when to sell.`; }
+  else { dec.textContent = "SOLD"; dec.className = "decision " + cls(e.closed.ret); why.textContent = `Exit rule triggered: ${pct(e.closed.ret)} on the trade.` + (S.start.condition === "feedback" ? (e.closed.ret > 0 ? " Neurons got the ordered reward signal." : " Neurons got the noisy penalty signal.") : ""); }
+
+  // account
+  $("sPnl").textContent = pct(e.equity); $("sPnl").className = cls(e.equity);
+  $("sBh").textContent = pct(e.buy_and_hold); $("sBh").className = cls(e.buy_and_hold);
+  $("sTrades").textContent = S.trades.length;
+  const wins = S.trades.filter(t => t.ret > 0).length;
+  $("sWin").textContent = S.trades.length ? Math.round(wins / S.trades.length * 100) + "%" : "—";
+  $("sPos").textContent = e.position ? "Long" : "Flat"; $("sPos").className = e.position ? "amber" : "";
+  $("sDay").textContent = `${idx + 1} / ${S.total}`;
+  drawPrice(); drawPnl();
+}
+
+function addBlotter(t) {
+  const body = $("blotter");
+  if (body.querySelector("td[colspan]")) body.innerHTML = "";
+  const tr = document.createElement("tr");
+  tr.className = "flash";
+  tr.innerHTML = `<td>${t.entry_date.slice(5)}</td><td>${t.exit_date.slice(5)}</td><td class="r">${t.entry.toFixed(2)}</td><td class="r">${t.exit.toFixed(2)}</td><td class="r ${cls(t.ret)}">${pct(t.ret)}</td>`;
+  body.prepend(tr);
+}
+
+function drawPrice() {
+  const svg = $("price"); svg.innerHTML = "";
+  const W = 900, H = 340, L = 8, R = 62, T = 10, B = 22;
+  const hist = S.history, closes = hist.concat(S.days.map(d => d.close));
+  const n = hist.length + S.total;
+  const lo = Math.min(...closes), hi = Math.max(...closes), pad = (hi - lo) * 0.08 || 1;
+  const x = i => L + (i / Math.max(1, n - 1)) * (W - L - R);
+  const y = v => T + (1 - (v - (lo - pad)) / (hi - lo + 2 * pad)) * (H - T - B);
+  for (let k = 0; k <= 4; k++) {
+    const v = lo - pad + (hi - lo + 2 * pad) * k / 4, yy = y(v);
+    el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: "#141a22" }, svg);
+    el("text", { x: W - R + 6, y: yy + 4 }, svg).textContent = v.toFixed(2);
+  }
+  // holding shading
+  S.holding.forEach((h, k) => {
+    if (!h) return;
+    const i = hist.length + k;
+    el("rect", { x: x(i - 0.5), y: T, width: Math.max(1, x(1) - x(0)), height: H - T - B, fill: "rgba(38,194,129,.10)" }, svg);
+  });
+  el("line", { x1: x(hist.length - 0.5), x2: x(hist.length - 0.5), y1: T, y2: H - B, stroke: "#2a3340", "stroke-dasharray": "3 4" }, svg);
+  let d = ""; closes.forEach((v, i) => d += (i ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1));
+  el("path", { d, fill: "none", stroke: "#E6E9EE", "stroke-width": 1.6 }, svg);
+  for (const k of S.buys) { const i = hist.length + k, v = S.days[k].close; el("path", { d: `M${x(i)},${y(v) + 6} l-6,10 h12 z`, fill: "var(--up)" }, svg); }
+  for (const ex of S.exits) { const i = hist.length + ex.idx, v = S.days[ex.idx].close; el("path", { d: `M${x(i)},${y(v) - 6} l-6,-10 h12 z`, fill: ex.ret > 0 ? "var(--up)" : "var(--down)" }, svg); }
+  if (S.days.length) {
+    const last = S.days[S.days.length - 1], i = closes.length - 1, yy = y(last.close);
+    el("line", { x1: x(i), x2: W - R, y1: yy, y2: yy, stroke: "var(--amber)", "stroke-dasharray": "2 3" }, svg);
+    el("rect", { x: W - R + 2, y: yy - 9, width: R - 4, height: 18, fill: "var(--amber)" }, svg);
+    const t = el("text", { x: W - R + 6, y: yy + 4 }, svg); t.textContent = last.close.toFixed(2); t.setAttribute("style", "fill:#000;font-weight:700");
+  }
+  el("text", { x: L, y: H - 6 }, svg).textContent = S.start.start_date;
+  const end = el("text", { x: W - R, y: H - 6, "text-anchor": "end" }, svg); end.textContent = S.start.end_date;
+}
+
+function drawPnl() {
+  const svg = $("pnl"); svg.innerHTML = "";
+  const W = 900, H = 180, L = 8, R = 62, T = 8, B = 10;
+  const eq = S.days.map(d => d.equity), bh = S.days.map(d => d.buy_and_hold);
+  const all = eq.concat(bh, [0]);
+  const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.1 || 0.01;
+  const x = i => L + (i / Math.max(1, S.total - 1)) * (W - L - R);
+  const y = v => T + (1 - (v - (lo - pad)) / (hi - lo + 2 * pad)) * (H - T - B);
+  el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), stroke: "#2a3340" }, svg);
+  el("text", { x: W - R + 6, y: y(0) + 4 }, svg).textContent = "0%";
+  for (const v of [lo, hi]) if (Math.abs(y(v) - y(0)) > 16) el("text", { x: W - R + 6, y: y(v) + 4 }, svg).textContent = pct(v, 0);
+  const path = arr => arr.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1)).join("");
+  if (bh.length) el("path", { d: path(bh), fill: "none", stroke: "var(--muted)", "stroke-width": 1.4, "stroke-dasharray": "4 4" }, svg);
+  if (eq.length) el("path", { d: path(eq), fill: "none", stroke: "var(--amber)", "stroke-width": 2.2 }, svg);
+}
+
+function onDone(e) {
+  $("cond").className = "tag";
+  $("decision").textContent = "SESSION OVER"; $("decision").className = "decision muted";
+  $("reason").textContent = "Results count closed trades only; any position still open at the end is ignored.";
+  $("sBh").textContent = pct(e.buy_and_hold); $("sBh").className = cls(e.buy_and_hold);
+  const box = $("summary"); box.classList.add("show");
+  if (!e.trades) { $("sumBig").textContent = "No trades were made."; $("sumText").textContent = "The buy electrodes never out-fired the wait electrodes."; return; }
+  const p = e.beats_random;
+  $("sumBig").innerHTML = `<span class="${cls(e.total_return)}">${pct(e.total_return)}</span> over ${e.trades} trades, beating ${Math.round(p * 100)}% of random traders`;
+  const verdict = p >= 0.95 ? "That’s unlikely to be luck: repeat the run to confirm it."
+    : p <= 0.05 ? "Worse than nearly all random traders: likely a real (bad) pattern, or bad luck."
+    : "That’s within the range of chance, so no edge can be claimed from this run.";
+  $("sumText").textContent = `Buy and hold: ${pct(e.buy_and_hold)}. Median random trader with the same trading rate and exit rules: ${pct(e.random_median)}. Win rate ${Math.round(e.win_rate * 100)}%, largest drop ${pct(-e.max_drawdown)}. ${verdict}`;
+}
+
+async function poll() {
+  try {
+    const r = await (await fetch(`/events?since=${since}`)).json();
+    if (r.run !== runId) { runId = r.run; since = 0; return setTimeout(poll, 50); }
+    for (const e of r.events) {
+      since++;
+      if (e.type === "start") reset(e);
+      else if (e.type === "day" && S) onDay(e);
+      else if (e.type === "done") onDone(e);
+      else if (e.type === "error") { $("reason").textContent = "Error: " + e.message; $("cond").className = "tag"; }
+      else if (e.type === "stopped") $("reason").textContent = "Stopped.";
+    }
+    $("start").disabled = r.running; $("stop").disabled = !r.running;
+  } catch { $("reason").textContent = "Can’t reach the server. Start it with: python serve_trading.py"; }
+  setTimeout(poll, 200);
+}
+
+$("start").addEventListener("click", async () => {
+  const body = { data: $("data").value, condition: $("condition").value, days: +$("days").value, pace: $("pace").value };
+  $("start").disabled = true;
+  const r = await (await fetch("/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+  if (r.error) { $("reason").textContent = r.error; $("start").disabled = false; }
+  else $("reason").textContent = "Connecting to the neurons…";
+});
+$("stop").addEventListener("click", () => fetch("/stop", { method: "POST" }));
+
+fetch("/datasets").then(r => r.json()).then(list => {
+  $("data").innerHTML = list.map(p => `<option value="${p}">${p.split(/[\\/]/).pop().replace(".csv", "").toUpperCase()}</option>`).join("") || `<option value="">No data: run fetch_data.py</option>`;
+  const spy = list.find(p => /spy/i.test(p)); if (spy) $("data").value = spy;
+});
+poll();
+</script>
+</body>
+</html>
